@@ -42,6 +42,70 @@ public class GlobalExceptionHandler {
                 .body(problem);
     }
 
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ProblemDetails> handleInvalidCredentials(InvalidCredentialsException ex, HttpServletRequest request) {
+        log.warn("Invalid credentials at [{}]: {}", request.getRequestURI(), ex.getMessage());
+        ProblemDetails problem = ProblemDetails.of(
+                "https://api.billing.enterprise.com/errors/invalid-credentials",
+                "Unauthorized",
+                HttpStatus.UNAUTHORIZED.value(),
+                ex.getMessage(),
+                request.getRequestURI(),
+                ex.getErrorCode()
+        );
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(QuotaExceededException.class)
+    public ResponseEntity<ProblemDetails> handleQuotaExceeded(QuotaExceededException ex, HttpServletRequest request) {
+        log.warn("Quota limit reached at [{}]: {}", request.getRequestURI(), ex.getMessage());
+        ProblemDetails problem = ProblemDetails.of(
+                "https://api.billing.enterprise.com/errors/quota-exceeded",
+                "Resource Quota Exceeded",
+                HttpStatus.FORBIDDEN.value(),
+                ex.getMessage(),
+                request.getRequestURI(),
+                ex.getErrorCode()
+        );
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ProblemDetails> handleResourceNotFound(ResourceNotFoundException ex, HttpServletRequest request) {
+        log.warn("Resource not found at [{}]: {}", request.getRequestURI(), ex.getMessage());
+        ProblemDetails problem = ProblemDetails.of(
+                "https://api.billing.enterprise.com/errors/not-found",
+                "Resource Not Found",
+                HttpStatus.NOT_FOUND.value(),
+                ex.getMessage(),
+                request.getRequestURI(),
+                ex.getErrorCode()
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(DuplicateResourceException.class)
+    public ResponseEntity<ProblemDetails> handleDuplicateResource(DuplicateResourceException ex, HttpServletRequest request) {
+        log.warn("Duplicate resource conflict at [{}]: {}", request.getRequestURI(), ex.getMessage());
+        ProblemDetails problem = ProblemDetails.of(
+                "https://api.billing.enterprise.com/errors/conflict",
+                "Conflict",
+                HttpStatus.CONFLICT.value(),
+                ex.getMessage(),
+                request.getRequestURI(),
+                ex.getErrorCode()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ProblemDetails> handleAuthenticationException(AuthenticationException ex, HttpServletRequest request) {
         log.warn("Authentication failure at [{}]: {}", request.getRequestURI(), ex.getMessage());

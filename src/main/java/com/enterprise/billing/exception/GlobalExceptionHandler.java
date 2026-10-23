@@ -90,6 +90,22 @@ public class GlobalExceptionHandler {
                 .body(problem);
     }
 
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<ProblemDetails> handleNoResourceFound(org.springframework.web.servlet.resource.NoResourceFoundException ex, HttpServletRequest request) {
+        log.warn("Resource path not found at [{}]: {}", request.getRequestURI(), ex.getMessage());
+        ProblemDetails problem = ProblemDetails.of(
+                "https://api.billing.enterprise.com/errors/not-found",
+                "Resource Not Found",
+                HttpStatus.NOT_FOUND.value(),
+                ex.getMessage(),
+                request.getRequestURI(),
+                "ERR_NOT_FOUND"
+        );
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
     @ExceptionHandler(DuplicateResourceException.class)
     public ResponseEntity<ProblemDetails> handleDuplicateResource(DuplicateResourceException ex, HttpServletRequest request) {
         log.warn("Duplicate resource conflict at [{}]: {}", request.getRequestURI(), ex.getMessage());
@@ -153,6 +169,22 @@ public class GlobalExceptionHandler {
                 request.getRequestURI(),
                 "ERR_VALIDATION_FAILED",
                 errors
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ProblemDetails> handleIllegalArgument(IllegalArgumentException ex, HttpServletRequest request) {
+        log.warn("Invalid request argument at [{}]: {}", request.getRequestURI(), ex.getMessage());
+        ProblemDetails problem = ProblemDetails.of(
+                "https://api.billing.enterprise.com/errors/invalid-argument",
+                "Bad Request",
+                HttpStatus.BAD_REQUEST.value(),
+                ex.getMessage(),
+                request.getRequestURI(),
+                "ERR_INVALID_REQUEST"
         );
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)

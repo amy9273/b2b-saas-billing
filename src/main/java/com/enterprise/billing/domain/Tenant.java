@@ -36,7 +36,7 @@ public class Tenant {
     @Column(name = "company_name", nullable = false, length = 100)
     private String companyName;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "plan_id")
     private Plan plan;
 

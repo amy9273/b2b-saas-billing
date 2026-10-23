@@ -18,6 +18,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -67,6 +70,9 @@ class PostgresIntegrationTest {
     @Autowired(required = false)
     private SubscriptionRepository subscriptionRepository;
 
+    @Autowired(required = false)
+    private PlatformTransactionManager transactionManager;
+
     @Test
     @DisplayName("Real PostgreSQL 16 container starts and Flyway migrations execute successfully")
     void testPostgreSQLConnectionAndFlywayMigrations() {
@@ -97,29 +103,34 @@ class PostgresIntegrationTest {
     }
 
     @Test
+    @Transactional
     @DisplayName("End-to-End Multi-Tenant Lifecycle on Real PostgreSQL 16 Container")
     void testMultiTenantLifecycleOnRealPostgres() {
-        Plan proPlan = planRepository.findByName("PRO").orElseThrow();
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+        txTemplate.execute(status -> {
+            Plan proPlan = planRepository.findByName("PRO").orElseThrow();
 
-        Tenant tenant = tenantRepository.save(Tenant.builder()
-                .companyName("Postgres Enterprise " + UUID.randomUUID())
-                .status(TenantStatus.ACTIVE)
-                .plan(proPlan)
-                .build());
+            Tenant tenant = tenantRepository.save(Tenant.builder()
+                    .companyName("Postgres Enterprise " + UUID.randomUUID())
+                    .status(TenantStatus.ACTIVE)
+                    .plan(proPlan)
+                    .build());
 
-        Instant now = Instant.now();
-        Subscription sub = subscriptionRepository.save(Subscription.builder()
-                .tenant(tenant)
-                .plan(proPlan)
-                .currentPeriodStart(now)
-                .currentPeriodEnd(now.plus(30, ChronoUnit.DAYS))
-                .build());
+            Instant now = Instant.now();
+            Subscription sub = subscriptionRepository.save(Subscription.builder()
+                    .tenant(tenant)
+                    .plan(proPlan)
+                    .currentPeriodStart(now)
+                    .currentPeriodEnd(now.plus(30, ChronoUnit.DAYS))
+                    .build());
 
-        assertThat(tenant.getId()).isNotNull();
-        assertThat(sub.getId()).isNotNull();
+            assertThat(tenant.getId()).isNotNull();
+            assertThat(sub.getId()).isNotNull();
 
-        // Verify row-level lock execution (SELECT ... FOR UPDATE) against real PostgreSQL 16 engine
-        Subscription lockedSub = subscriptionRepository.findByTenantIdWithLock(tenant.getId()).orElseThrow();
-        assertThat(lockedSub.getPlan().getName()).isEqualTo("PRO");
+            // Verify row-level lock execution (SELECT ... FOR UPDATE) against real PostgreSQL 16 engine
+            Subscription lockedSub = subscriptionRepository.findByTenantIdWithLock(tenant.getId()).orElseThrow();
+            assertThat(lockedSub.getPlan().getName()).isEqualTo("PRO");
+            return null;
+        });
     }
 }

@@ -62,9 +62,9 @@ public class UserService {
             ));
         }
 
-        // 2. Uniqueness check within tenant
+        // 2. Uniqueness check
         String normalizedEmail = request.email().toLowerCase().trim();
-        if (userRepository.existsByTenantIdAndEmail(tenantId, normalizedEmail)) {
+        if (userRepository.existsByEmail(normalizedEmail)) {
             throw new DuplicateResourceException("User already exists with email: " + normalizedEmail);
         }
 

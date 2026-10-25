@@ -23,7 +23,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "users", uniqueConstraints = {
-        @UniqueConstraint(name = "uq_tenant_user_email", columnNames = {"tenant_id", "email"})
+        @UniqueConstraint(name = "uq_users_email", columnNames = {"email"})
 })
 @Getter
 @Setter

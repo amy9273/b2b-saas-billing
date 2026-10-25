@@ -33,3 +33,8 @@ Thumbs.db
 .scannerwork/
 coverage/
 .testcontainers/
+
+# Local Audit Reports
+AUDIT_REPORT.md
+AUDIT_REPORT*.md
+

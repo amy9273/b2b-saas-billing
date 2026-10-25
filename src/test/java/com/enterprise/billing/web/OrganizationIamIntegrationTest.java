@@ -241,4 +241,45 @@ class OrganizationIamIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.companyName").value("Beta Logistics"));
     }
+
+    @Test
+    @DisplayName("Registration rejects duplicate admin email across different tenants with 409 Conflict")
+    void shouldRejectRegistrationWithExistingEmailAcrossDifferentTenants() throws Exception {
+        // Register Tenant 1 with admin email
+        RegisterTenantRequest reg1 = new RegisterTenantRequest(
+                "Company One",
+                "shared.admin@corp.com",
+                "Password123!",
+                "FREE"
+        );
+        mockMvc.perform(post("/api/auth/register-tenant")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(reg1)))
+                .andExpect(status().isCreated());
+
+        // Register Tenant 2 with different company name but identical admin email
+        RegisterTenantRequest reg2 = new RegisterTenantRequest(
+                "Company Two",
+                "shared.admin@corp.com",
+                "DifferentPassword123!",
+                "PRO"
+        );
+        mockMvc.perform(post("/api/auth/register-tenant")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(reg2)))
+                .andExpect(status().isConflict())
+                .andExpect(header().string("Content-Type", MediaType.APPLICATION_PROBLEM_JSON_VALUE))
+                .andExpect(jsonPath("$.status").value(409))
+                .andExpect(jsonPath("$.errorCode").value("ERR_DUPLICATE_RESOURCE"))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("Email is already registered: shared.admin@corp.com")));
+
+        // Tenant 1 admin can still log in without collision or IncorrectResultSizeDataAccessException
+        LoginRequest validLogin = new LoginRequest("shared.admin@corp.com", "Password123!");
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(validLogin)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isString())
+                .andExpect(jsonPath("$.email").value("shared.admin@corp.com"));
+    }
 }

@@ -93,15 +93,7 @@ public class SubscriptionService {
                 ? headerIdempotencyKey.trim()
                 : (request.idempotencyKey() != null && !request.idempotencyKey().isBlank() ? request.idempotencyKey().trim() : null);
 
-        // 2. Check Idempotent replay
-        if (idempotencyKey != null) {
-            Optional<Invoice> existingInvoice = invoiceRepository.findByTenantIdAndIdempotencyKey(tenantId, idempotencyKey);
-            if (existingInvoice.isPresent()) {
-                return getSubscription();
-            }
-        }
-
-        // 3. Acquire pessimistic lock on subscription to prevent concurrent race conditions
+        // 2. Acquire pessimistic lock on subscription to prevent concurrent race conditions
         Subscription subscription = subscriptionRepository.findByTenantIdWithLock(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Subscription not found for tenant: " + tenantId));
 

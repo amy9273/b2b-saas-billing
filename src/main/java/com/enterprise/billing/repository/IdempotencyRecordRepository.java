@@ -11,4 +11,6 @@ import java.util.UUID;
 public interface IdempotencyRecordRepository extends JpaRepository<IdempotencyRecord, UUID> {
 
     Optional<IdempotencyRecord> findByTenantIdAndIdempotencyKey(UUID tenantId, String idempotencyKey);
+
+    void deleteByTenantIdAndIdempotencyKey(UUID tenantId, String idempotencyKey);
 }

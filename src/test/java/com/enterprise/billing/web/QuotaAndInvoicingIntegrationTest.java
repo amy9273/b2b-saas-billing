@@ -3,6 +3,8 @@ package com.enterprise.billing.web;
 import com.enterprise.billing.domain.ApiUsage;
 import com.enterprise.billing.domain.Invoice;
 import com.enterprise.billing.domain.InvoiceStatus;
+import com.enterprise.billing.domain.UserRole;
+import com.enterprise.billing.dto.CreateUserRequest;
 import com.enterprise.billing.dto.LoginRequest;
 import com.enterprise.billing.dto.RegisterTenantRequest;
 import com.enterprise.billing.dto.UpgradeSubscriptionRequest;
@@ -33,6 +35,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -77,6 +80,18 @@ class QuotaAndInvoicingIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
+                .andReturn();
+
+        JsonNode jsonNode = objectMapper.readTree(result.getResponse().getContentAsString());
+        return jsonNode.get("token").asText();
+    }
+
+    private String loginAndGetToken(String email, String password) throws Exception {
+        LoginRequest loginRequest = new LoginRequest(email, password);
+        MvcResult result = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isOk())
                 .andReturn();
 
         JsonNode jsonNode = objectMapper.readTree(result.getResponse().getContentAsString());
@@ -273,5 +288,61 @@ class QuotaAndInvoicingIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("ERR_INVALID_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("Non-admin role cannot pay invoice (403 Forbidden ERR_FORBIDDEN)")
+    void shouldBlockNonAdminFromPayingInvoice() throws Exception {
+        String adminToken = registerAndGetToken("Security Corp", "admin@securitycorp.com", "FREE");
+
+        // Invite member
+        CreateUserRequest inviteReq = new CreateUserRequest("member@securitycorp.com", "MemberPass123!", UserRole.ROLE_MEMBER);
+        mockMvc.perform(post("/api/users")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(inviteReq)))
+                .andExpect(status().isCreated());
+
+        String memberToken = loginAndGetToken("member@securitycorp.com", "MemberPass123!");
+
+        MvcResult meResult = mockMvc.perform(get("/api/subscriptions/me")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        UUID tenantId = UUID.fromString(objectMapper.readTree(meResult.getResponse().getContentAsString()).get("tenantId").asText());
+
+        Invoice pendingInvoice = invoiceRepository.save(Invoice.builder()
+                .tenant(tenantRepository.findById(tenantId).orElseThrow())
+                .amount(new BigDecimal("99.00"))
+                .status(InvoiceStatus.PENDING)
+                .billingPeriodStart(LocalDate.now(ZoneOffset.UTC))
+                .billingPeriodEnd(LocalDate.now(ZoneOffset.UTC).plusDays(30))
+                .createdAt(Instant.now())
+                .build());
+
+        // Member attempts payment -> 403 Forbidden
+        mockMvc.perform(post("/api/invoices/" + pendingInvoice.getId() + "/pay")
+                        .header("Authorization", "Bearer " + memberToken))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("Content-Type", MediaType.APPLICATION_PROBLEM_JSON_VALUE))
+                .andExpect(jsonPath("$.errorCode").value("ERR_FORBIDDEN"));
+
+        // Admin attempts payment -> 200 OK
+        mockMvc.perform(post("/api/invoices/" + pendingInvoice.getId() + "/pay")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PAID"));
+    }
+
+    @Test
+    @DisplayName("CORS preflight request succeeds with configured allowed origins and methods")
+    void shouldSupportCorsPreflightRequests() throws Exception {
+        mockMvc.perform(options("/api/plans")
+                        .header("Origin", "http://localhost:3000")
+                        .header("Access-Control-Request-Method", "GET")
+                        .header("Access-Control-Request-Headers", "Authorization,Content-Type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:3000"))
+                .andExpect(header().string("Access-Control-Allow-Methods", org.hamcrest.Matchers.containsString("GET")));
     }
 }

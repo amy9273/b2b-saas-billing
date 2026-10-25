@@ -246,6 +246,14 @@ Database migrations (`db/migration/V1__init_schema.sql`) provision compound inde
 | `POST` | `/api/subscriptions/preview-proration` | Authenticated | Calculates exact proration credit, charges, and net due without mutating database state. |
 | `POST` | `/api/subscriptions/upgrade` | `ROLE_ADMIN` | Executes atomic upgrade with pessimistic locking, downgrade validation, and invoice generation. |
 
+### 4. Usage Metering & Invoicing
+| Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/usage/summary` | Authenticated | Retrieves current API usage count, quota limits, and exact `BigDecimal` usage percentage. |
+| `GET` | `/api/invoices` | Authenticated | Paginated history of tenant invoices. |
+| `GET` | `/api/invoices/{id}` | Authenticated | Fetches invoice by ID with strict tenant isolation. |
+| `POST` | `/api/invoices/{id}/pay` | `ROLE_ADMIN` | Transitions invoice status from `PENDING` to `PAID` with row-level pessimistic locking. |
+
 #### Sample Proration Preview Payload
 ```json
 // POST /api/subscriptions/preview-proration
@@ -292,10 +300,11 @@ All error responses strictly follow the **RFC 7807 Problem Details** standard wi
 | `400 Bad Request` | `ERR_VALIDATION_FAILED` | Bean validation constraint violation on request body. |
 | `400 Bad Request` | `ERR_INVALID_REQUEST` | Semantic violation (e.g., upgrading to identical plan). |
 | `401 Unauthorized` | `ERR_UNAUTHORIZED` | Expired, tampered, or missing JWT token. |
-| `403 Forbidden` | `ERR_FORBIDDEN` | Caller lacks required role permission (e.g. non-admin upgrade). |
+| `403 Forbidden` | `ERR_FORBIDDEN` | Caller lacks required role permission (e.g. non-admin upgrade or payment). |
 | `403 Forbidden` | `ERR_QUOTA_EXCEEDED` | Seat quota limit exceeded or downgrade blocked due to active users. |
 | `404 Not Found` | `ERR_NOT_FOUND` | Resource does not exist or belongs to another tenant. |
 | `409 Conflict` | `ERR_CONFLICT` | Unique key violation (e.g., duplicate email within tenant). |
+| `409 Conflict` | `ERR_IDEMPOTENCY_CONFLICT` | Idempotency key replayed with mismatched payload or concurrent in-flight request. |
 | `500 Internal Server` | `ERR_INTERNAL_SERVER` | Unhandled system exception. |
 
 ---
@@ -308,8 +317,13 @@ All error responses strictly follow the **RFC 7807 Problem Details** standard wi
 | **Unit 02** | JWT Security & Tenant Context | Stateless JWT authentication, `TenantContext` ThreadLocal, RFC 7807 error handlers. | ✅ Complete |
 | **Unit 03** | Plans, Registration & IAM | Tenant signup, member invite API, role-based access control, seat quota gating. | ✅ Complete |
 | **Unit 04** | Subscription Upgrades & Proration | Exact `BigDecimal` proration engine, pessimistic locking (`FOR UPDATE`), invoices. | ✅ Complete |
-| **Unit 05** | Quota Middleware & Invoicing Engine | Usage metering, API rate-limiting gates, itemized invoice state transitions. | ⚪ Pending |
-| **Unit 06** | Testcontainers Suite & Production Docker | Real PostgreSQL container integration tests, multi-stage production Dockerfile. | ⚪ Pending |
+| **Unit 05** | Quota Middleware & Invoicing Engine | Usage metering, API rate-limiting gates, itemized invoice state transitions. | ✅ Complete |
+| **Unit 06** | Testcontainers Suite & Production Docker | Real PostgreSQL container integration tests, multi-stage production Dockerfile. | ✅ Complete |
+| **Unit 07** | IAM & Multi-Tenant Isolation Remediation | Email collision fix, global uniqueness, top-level ThreadLocal cleanup, Flyway V4. | ✅ Complete |
+| **Unit 08** | Idempotency Pipeline & Financial Ledgers | IdempotencyFilter, compound key constraint, payload SHA-256 hash, RESTRICT cascade. | ✅ Complete |
+| **Unit 09** | Concurrency Control & Real-Time Quotas | Pessimistic locking on seats and invoices, lock re-ordering, atomic usage increments. | ✅ Complete |
+| **Unit 10** | Billing Precision & Lifecycle Remediation | Eliminated double primitives, expired renewal fix ($0 exploit), calendar-month cycles. | ✅ Complete |
+| **Unit 11** | Security Hardening & CI Parity Gate | Invoice pay RBAC, fail-fast JWT secret, explicit CORS configuration, CI parity. | ✅ Complete |
 
 ---
 
@@ -344,13 +358,17 @@ The application will automatically start on `http://localhost:8080` and run Flyw
 ## Automated Verification & Test Strategy
 
 We adopt the **Triple-Tier Test Strategy**:
-1. **Unit Tests (Fast, In-Memory):** Test pure mathematical logic and proration calculation without I/O (`ProrationServiceTest`).
-2. **Integration Tests (MockMvc & Spring Context):** Test end-to-end HTTP request filters, security policies, seat quota blocks, and database mutations (`OrganizationIamIntegrationTest`, `SubscriptionUpgradeIntegrationTest`).
-3. **Multi-Threaded Concurrency Tests:** Validate database row-level locking under high concurrent load (`SubscriptionConcurrencyTest`).
+1. **Unit Tests (Fast, In-Memory):** Test pure mathematical logic, proration calculation, and fail-fast validators without I/O (`ProrationServiceTest`, `UsageMeteringServiceTest`, `JwtSecretValidatorTest`).
+2. **Integration Tests (MockMvc & Spring Context):** Test end-to-end HTTP request filters, security policies, seat quota blocks, and database mutations (`OrganizationIamIntegrationTest`, `SubscriptionUpgradeIntegrationTest`, `QuotaAndInvoicingIntegrationTest`, `IdempotencyIntegrationTest`).
+3. **Multi-Threaded Concurrency Tests:** Validate database row-level locking under high concurrent load (`SubscriptionConcurrencyTest`, `QuotaAndPaymentConcurrencyTest`).
+4. **Real PostgreSQL Container Tests:** Validate PostgreSQL schema migrations, Actuator health probes, and row-level locking via Testcontainers (`PostgresIntegrationTest`).
 
 ### Run the Full Test Suite
 ```bash
 # Run all automated tests
 .\mvnw.cmd test
+
+# Run tests with real PostgreSQL Testcontainers profile
+.\mvnw.cmd test -Ppostgres-it
 ```
-*(All 31 automated tests currently execute in under 30 seconds with 100% pass rate).*
+*(All automated tests execute with 100% pass rate).*

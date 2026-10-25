@@ -99,4 +99,22 @@ class JwtSecurityIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("admin-access-granted"));
     }
+
+    @Test
+    @DisplayName("Unauthenticated request guarantees TenantContext cleanup even if thread had leftover state")
+    void shouldEnsureThreadCleanlinessOnUnauthenticatedRequest() throws Exception {
+        // Pre-pollute ThreadLocal before request executes
+        TenantContext.setTenantId(UUID.randomUUID());
+        assertThat(TenantContext.getTenantId()).isNotNull();
+
+        try {
+            mockMvc.perform(get("/api/plans"))
+                    .andExpect(status().isOk());
+
+            // Invariant #2: TenantContext must be completely cleared by filter finally block
+            assertThat(TenantContext.getTenantId()).isNull();
+        } finally {
+            TenantContext.clear();
+        }
+    }
 }

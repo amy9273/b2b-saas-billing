@@ -14,6 +14,11 @@ Current project state, implementation roadmap, and completion status.
 | **Unit 04** | Subscription Upgrades, Proration & Concurrency | Tier upgrades, proration billing math, row-level pessimistic locks | ✅ Complete |
 | **Unit 05** | Quota Enforcement Middleware & Idempotent Invoicing | Rate-limiting, resource limit gates (403), immutable invoice generation | ✅ Complete |
 | **Unit 06** | Testcontainers Integration Suite & Production Docker | Integration tests on real PostgreSQL container, multi-stage Dockerfile | ✅ Complete |
+| **Unit 07** | IAM & Multi-Tenant Isolation Remediation | Email collision fix, global uniqueness, top-level ThreadLocal cleanup, Flyway V4 | ✅ Complete |
+| **Unit 08** | Idempotency Pipeline & Financial Ledger Hardening | Complete IdempotencyFilter, compound key constraint, payload hash check, RESTRICT cascade | ⚪ Pending |
+| **Unit 09** | Concurrency Control & Real-Time Quota Guardrails | Pessimistic locking on user seat invites, lock re-ordering, atomic API quota SQL, pay lock | ⚪ Pending |
+| **Unit 10** | Billing Precision & Subscription Lifecycle Remediation | Eliminate double primitives, expired renewal fix ($0 exploit), calendar-month cycles | ⚪ Pending |
+| **Unit 11** | Security Hardening, CI Parity & Documentation Sync | Fail-fast JWT secret, invoice payment RBAC, CORS configuration, Testcontainers CI gate | ⚪ Pending |
 
 ---
 
@@ -26,6 +31,8 @@ Current project state, implementation roadmap, and completion status.
 - **2026-10-23**: **Unit 04 Completed**. Implemented high-precision proration billing engine (`BigDecimal` scale 2, `RoundingMode.HALF_UP`), row-level pessimistic write locking (`@Lock(LockModeType.PESSIMISTIC_WRITE)`) on subscriptions to prevent concurrent race conditions, active user downgrade quota guardrail, immutable invoice emission, audit logging, idempotent upgrade support, and 100% passing test suite (31/31 tests across unit, integration, and multi-threaded concurrency suites).
 - **2026-10-23**: **Unit 05 Completed**. Implemented Flyway migration `V3__usage_metering_and_idempotency.sql`, `ApiUsage` and `IdempotencyRecord` domain entities/repositories, `UsageMeteringService`, `QuotaEnforcementInterceptor` with rate-limit headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`) and `403 ERR_QUOTA_EXCEEDED` gating, `UsageController` (`/api/usage/summary`), `InvoiceController` (paginated invoice history, dual-verification, pay transitions, audit logging), and 100% passing test suite (37/37 tests).
 - **2026-10-23**: **Unit 06 Completed**. Implemented `PostgresIntegrationTest` leveraging Testcontainers (`@Testcontainers(disabledWithoutDocker = true)`) for verifying Flyway migrations `V1`-`V3`, UUID v4 generation, Spring Boot Actuator `/actuator/health` probe, row-level pessimistic write locking on real PostgreSQL 16 Alpine container, created production multi-stage `Dockerfile` (Eclipse Adoptium Temurin 21 JDK builder + JRE runtime, non-root user `appuser:appgroup`, layered JAR extraction, healthcheck probe), created `.dockerignore`, added `spring-boot-starter-actuator` to `pom.xml`, and verified 100% passing test suite (40 total tests).
+- **2026-10-25**: **Comprehensive Security, Concurrency, Billing & Database Audit Completed**. Delivered full [AUDIT_REPORT.md](file:///c:/Project/b2b-saas-billing/AUDIT_REPORT.md) uncovering 5 Critical and 8 High severity findings across tenant isolation, user quota race conditions, $0.00 upgrade exploits, dead idempotency entities, and test skipping. Formulated Remediation Roadmap with Units 07–11 and created active specification files in `context/specs/`.
+- **2026-10-25**: **Unit 07 Completed**. Implemented `V4__fix_tenant_isolation_and_indexes.sql` migration (enforced global `uq_users_email` UNIQUE constraint, dropped redundant B-Tree index on `invoices.idempotency_key`, added index on `subscriptions.plan_id`), eliminated cross-tenant email collision / DoS by validating email uniqueness globally in `AuthService` and `UserService`, refactored `JwtAuthenticationFilter` to enforce `TenantContext.clear()` in top-level `finally` block across 100% of execution paths (including unauthenticated/anonymous requests), added regression integration tests for cross-tenant registration rejection and filter thread cleanliness, and verified 100% passing test suite (42/42 tests passing).
 
 ---
 
@@ -34,3 +41,4 @@ Current project state, implementation roadmap, and completion status.
 1. **Database:** PostgreSQL 16 Alpine running on port `5432` via Docker Compose.
 2. **Multi-Tenancy:** Discriminator column pattern (`tenant_id` on all tenant-owned tables) with `ThreadLocal` context management.
 3. **Financial Precision:** `BigDecimal` with scale 2 and `RoundingMode.HALF_UP`.
+4. **Remediation Units:** Units 07 to 11 established as the formal remediation roadmap.

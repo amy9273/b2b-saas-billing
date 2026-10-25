@@ -42,47 +42,47 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull HttpServletResponse response,
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
-        String authHeader = request.getHeader("Authorization");
-
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        String token = authHeader.substring(7).trim();
-
         try {
-            if (jwtService.isTokenValid(token)) {
-                String email = jwtService.extractEmail(token);
-                UUID tenantId = jwtService.extractTenantId(token);
-                String role = jwtService.extractRole(token);
+            String authHeader = request.getHeader("Authorization");
 
-                var authorities = List.of(new SimpleGrantedAuthority(role));
-                var authentication = new UsernamePasswordAuthenticationToken(email, null, authorities);
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+            if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                String token = authHeader.substring(7).trim();
 
-                SecurityContextHolder.getContext().setAuthentication(authentication);
-                TenantContext.setTenantId(tenantId);
-            } else {
-                SecurityContextHolder.clearContext();
-                authenticationEntryPoint.commence(
-                        request,
-                        response,
-                        new BadCredentialsException("Authentication token is expired or invalid")
-                );
-                return;
+                try {
+                    if (jwtService.isTokenValid(token)) {
+                        String email = jwtService.extractEmail(token);
+                        UUID tenantId = jwtService.extractTenantId(token);
+                        String role = jwtService.extractRole(token);
+
+                        var authorities = List.of(new SimpleGrantedAuthority(role));
+                        var authentication = new UsernamePasswordAuthenticationToken(email, null, authorities);
+                        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                        TenantContext.setTenantId(tenantId);
+                    } else {
+                        SecurityContextHolder.clearContext();
+                        authenticationEntryPoint.commence(
+                                request,
+                                response,
+                                new BadCredentialsException("Authentication token is expired or invalid")
+                        );
+                        return;
+                    }
+                } catch (InvalidTokenException ex) {
+                    SecurityContextHolder.clearContext();
+                    authenticationEntryPoint.commence(
+                            request,
+                            response,
+                            new BadCredentialsException(ex.getMessage(), ex)
+                    );
+                    return;
+                }
             }
 
             filterChain.doFilter(request, response);
-        } catch (InvalidTokenException ex) {
-            SecurityContextHolder.clearContext();
-            authenticationEntryPoint.commence(
-                    request,
-                    response,
-                    new BadCredentialsException(ex.getMessage(), ex)
-            );
         } finally {
-            // Invariant #2: Always clear TenantContext ThreadLocal to prevent connection pool thread reuse leakage
+            // Invariant #2: Always clear TenantContext ThreadLocal on 100% of execution paths
             TenantContext.clear();
         }
     }

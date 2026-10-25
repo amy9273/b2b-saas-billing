@@ -58,6 +58,11 @@ public class AuthService {
             throw new DuplicateResourceException("Company name is already registered: " + companyName);
         }
 
+        String normalizedEmail = request.adminEmail().toLowerCase().trim();
+        if (userRepository.existsByEmail(normalizedEmail)) {
+            throw new DuplicateResourceException("Email is already registered: " + normalizedEmail);
+        }
+
         String targetPlan = request.planName() != null && !request.planName().isBlank()
                 ? request.planName()
                 : "FREE";
@@ -84,7 +89,6 @@ public class AuthService {
         subscriptionRepository.save(subscription);
 
         // 3. Create Default Admin User
-        String normalizedEmail = request.adminEmail().toLowerCase().trim();
         User adminUser = User.builder()
                 .tenant(savedTenant)
                 .email(normalizedEmail)

@@ -54,7 +54,7 @@ public class InvoiceService {
 
     public InvoiceResponse payInvoice(UUID id) {
         UUID tenantId = getRequiredTenantId();
-        Invoice invoice = invoiceRepository.findByIdAndTenantId(id, tenantId)
+        Invoice invoice = invoiceRepository.findByIdAndTenantIdWithLock(id, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Invoice not found: " + id));
 
         if (invoice.getStatus() == InvoiceStatus.PAID) {

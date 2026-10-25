@@ -101,8 +101,12 @@ public class SubscriptionService {
         Plan targetPlan = planRepository.findByNameIgnoreCase(request.targetPlanName())
                 .orElseThrow(() -> new ResourceNotFoundException("Plan not found: " + request.targetPlanName()));
 
-        // 5. Prevent no-op change to the exact same plan
+        // 3. Prevent no-op change to the exact same plan, but safely replay if an invoice exists for this key
         if (subscription.getPlan().getId().equals(targetPlan.getId())) {
+            if (idempotencyKey != null && invoiceRepository.findByTenantIdAndIdempotencyKey(tenantId, idempotencyKey).isPresent()) {
+                long daysRemaining = prorationService.calculateDaysRemaining(subscription.getCurrentPeriodEnd(), Instant.now());
+                return SubscriptionResponse.from(subscription, daysRemaining);
+            }
             throw new IllegalArgumentException("Tenant is already subscribed to plan: " + targetPlan.getName());
         }
 

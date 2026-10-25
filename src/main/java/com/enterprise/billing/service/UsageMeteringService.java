@@ -66,7 +66,7 @@ public class UsageMeteringService {
 
     @Transactional
     public QuotaCheckResult recordAndCheckQuota(UUID tenantId) {
-        Subscription subscription = subscriptionRepository.findByTenantId(tenantId).orElse(null);
+        Subscription subscription = subscriptionRepository.findByTenantIdWithLock(tenantId).orElse(null);
         if (subscription == null) {
             return new QuotaCheckResult(Integer.MAX_VALUE, Integer.MAX_VALUE);
         }

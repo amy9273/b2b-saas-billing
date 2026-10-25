@@ -46,9 +46,10 @@ public class UserService {
                 .map(UserResponse::from);
     }
 
+    @Transactional
     public UserResponse createUser(CreateUserRequest request) {
         UUID tenantId = getRequiredTenantId();
-        Tenant tenant = tenantRepository.findById(tenantId)
+        Tenant tenant = tenantRepository.findByIdWithLock(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
         // 1. Quota Enforcement: Verify user seat capacity

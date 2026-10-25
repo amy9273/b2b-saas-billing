@@ -17,13 +17,16 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import jakarta.persistence.UniqueConstraint;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
-@Table(name = "invoices")
+@Table(name = "invoices", uniqueConstraints = {
+        @UniqueConstraint(name = "uq_invoices_tenant_idempotency", columnNames = {"tenant_id", "idempotency_key"})
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -47,7 +50,7 @@ public class Invoice {
     @Builder.Default
     private InvoiceStatus status = InvoiceStatus.PENDING;
 
-    @Column(name = "idempotency_key", length = 100, unique = true)
+    @Column(name = "idempotency_key", length = 100)
     private String idempotencyKey;
 
     @Column(name = "billing_period_start", nullable = false)

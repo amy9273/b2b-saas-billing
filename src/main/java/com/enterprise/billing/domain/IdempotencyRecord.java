@@ -43,6 +43,9 @@ public class IdempotencyRecord {
     @Column(nullable = false, length = 255)
     private String endpoint;
 
+    @Column(name = "request_hash", length = 64)
+    private String requestHash;
+
     @Column(name = "response_status")
     private Integer responseStatus;
 

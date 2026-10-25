@@ -1,5 +1,6 @@
 package com.enterprise.billing.dto;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -9,7 +10,7 @@ public record UsageSummaryResponse(
         long callCount,
         int maxApiCalls,
         long remainingCalls,
-        double usagePercentage,
+        BigDecimal usagePercentage,
         LocalDate billingPeriodStart,
         LocalDate billingPeriodEnd
 ) {

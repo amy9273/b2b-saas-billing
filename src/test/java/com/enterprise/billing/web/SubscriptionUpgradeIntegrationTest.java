@@ -24,6 +24,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.enterprise.billing.domain.Subscription;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -87,18 +92,28 @@ class SubscriptionUpgradeIntegrationTest {
     void shouldReturnActiveSubscriptionDetails() throws Exception {
         String token = registerAndGetToken("Acme SaaS", "admin@acme.com", "FREE");
 
+        int expectedDays = (int) ChronoUnit.DAYS.between(
+                LocalDate.now(ZoneOffset.UTC),
+                LocalDate.now(ZoneOffset.UTC).plusMonths(1)
+        );
+
         mockMvc.perform(get("/api/subscriptions/me")
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.plan.name").value("FREE"))
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
-                .andExpect(jsonPath("$.daysRemaining").value(30));
+                .andExpect(jsonPath("$.daysRemaining").value(expectedDays));
     }
 
     @Test
     @DisplayName("POST /api/subscriptions/preview-proration calculates preview without mutating state")
     void shouldPreviewProrationWithoutStateMutation() throws Exception {
         String token = registerAndGetToken("Wayne Enterprises", "bruce@wayne.com", "FREE");
+
+        int expectedDays = (int) ChronoUnit.DAYS.between(
+                LocalDate.now(ZoneOffset.UTC),
+                LocalDate.now(ZoneOffset.UTC).plusMonths(1)
+        );
 
         UpgradeSubscriptionRequest previewReq = new UpgradeSubscriptionRequest("PRO", null);
 
@@ -111,8 +126,8 @@ class SubscriptionUpgradeIntegrationTest {
                 .andExpect(jsonPath("$.newPlanName").value("PRO"))
                 .andExpect(jsonPath("$.oldPlanPrice").value(0.00))
                 .andExpect(jsonPath("$.newPlanPrice").value(49.00))
-                .andExpect(jsonPath("$.daysRemaining").value(30))
-                .andExpect(jsonPath("$.totalDays").value(30))
+                .andExpect(jsonPath("$.daysRemaining").value(expectedDays))
+                .andExpect(jsonPath("$.totalDays").value(expectedDays))
                 .andExpect(jsonPath("$.proratedCredit").value(0.00))
                 .andExpect(jsonPath("$.newPlanCharge").value(49.00))
                 .andExpect(jsonPath("$.netDue").value(49.00));
@@ -287,5 +302,66 @@ class SubscriptionUpgradeIntegrationTest {
                 .andExpect(status().isNotFound())
                 .andExpect(header().string("Content-Type", MediaType.APPLICATION_PROBLEM_JSON_VALUE))
                 .andExpect(jsonPath("$.errorCode").value("ERR_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("Upgrading expired subscription triggers full cycle renewal, resets period window, and charges full plan price")
+    void shouldRenewExpiredSubscriptionWithFullChargeAndNewPeriodWindow() throws Exception {
+        String token = registerAndGetToken("Expired Corp", "admin@expiredcorp.com", "FREE");
+
+        // Fetch subscription and set currentPeriodEnd to 2 days in the past
+        MvcResult meResult = mockMvc.perform(get("/api/subscriptions/me")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode subJson = objectMapper.readTree(meResult.getResponse().getContentAsString());
+        UUID tenantId = UUID.fromString(subJson.get("tenantId").asText());
+
+        Subscription subscription = subscriptionRepository.findByTenantId(tenantId).orElseThrow();
+        Instant expiredEnd = Instant.now().minus(2, ChronoUnit.DAYS);
+        Instant expiredStart = Instant.now().minus(32, ChronoUnit.DAYS);
+        subscription.setCurrentPeriodStart(expiredStart);
+        subscription.setCurrentPeriodEnd(expiredEnd);
+        subscriptionRepository.saveAndFlush(subscription);
+
+        // Verify preview reflects renewal with full price $299.00 and $0 credit
+        UpgradeSubscriptionRequest previewReq = new UpgradeSubscriptionRequest("ENTERPRISE", null);
+        mockMvc.perform(post("/api/subscriptions/preview-proration")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(previewReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.oldPlanName").value("FREE"))
+                .andExpect(jsonPath("$.newPlanName").value("ENTERPRISE"))
+                .andExpect(jsonPath("$.oldPlanPrice").value(0.00))
+                .andExpect(jsonPath("$.proratedCredit").value(0.00))
+                .andExpect(jsonPath("$.newPlanPrice").value(299.00))
+                .andExpect(jsonPath("$.newPlanCharge").value(299.00))
+                .andExpect(jsonPath("$.netDue").value(299.00));
+
+        // Upgrade to ENTERPRISE
+        String idempotencyKey = UUID.randomUUID().toString();
+        UpgradeSubscriptionRequest upgradeReq = new UpgradeSubscriptionRequest("ENTERPRISE", idempotencyKey);
+
+        mockMvc.perform(post("/api/subscriptions/upgrade")
+                        .header("Authorization", "Bearer " + token)
+                        .header("X-Idempotency-Key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(upgradeReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.plan.name").value("ENTERPRISE"))
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        // Verify database invoice was generated for full $299.00 (NOT $0.00 exploit)
+        List<Invoice> invoices = invoiceRepository.findAllByTenantId(tenantId, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        assertThat(invoices).hasSize(1);
+        Invoice invoice = invoices.get(0);
+        assertThat(invoice.getAmount()).isEqualByComparingTo("299.00");
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.PAID);
+
+        // Verify subscription dates were reset to new cycle starting now
+        Subscription updatedSub = subscriptionRepository.findByTenantId(tenantId).orElseThrow();
+        assertThat(updatedSub.getCurrentPeriodStart()).isAfter(expiredStart);
+        assertThat(updatedSub.getCurrentPeriodEnd()).isAfter(Instant.now());
     }
 }

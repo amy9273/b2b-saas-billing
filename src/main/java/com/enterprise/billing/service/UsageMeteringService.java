@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -50,7 +52,11 @@ public class UsageMeteringService {
         long callCount = usage != null ? usage.getCallCount() : 0L;
         int maxApiCalls = plan.getMaxApiCalls();
         long remainingCalls = Math.max(0, maxApiCalls - callCount);
-        double usagePercentage = maxApiCalls > 0 ? (double) Math.round(((double) callCount / maxApiCalls) * 10000.0) / 100.0 : 0.0;
+        BigDecimal usagePercentage = maxApiCalls > 0
+                ? BigDecimal.valueOf(callCount)
+                    .multiply(BigDecimal.valueOf(100))
+                    .divide(BigDecimal.valueOf(maxApiCalls), 2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
         return new UsageSummaryResponse(
                 tenantId,

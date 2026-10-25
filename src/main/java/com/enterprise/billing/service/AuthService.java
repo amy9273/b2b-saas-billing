@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
+import java.time.ZoneOffset;
 
 @Service
 @Transactional
@@ -76,9 +76,9 @@ public class AuthService {
                 .build();
         Tenant savedTenant = tenantRepository.save(tenant);
 
-        // 2. Create Initial Subscription (30-day initial period)
+        // 2. Create Initial Subscription (Calendar-month initial period)
         Instant now = Instant.now();
-        Instant periodEnd = now.plus(30, ChronoUnit.DAYS);
+        Instant periodEnd = now.atZone(ZoneOffset.UTC).plusMonths(1).toInstant();
         Subscription subscription = Subscription.builder()
                 .tenant(savedTenant)
                 .plan(plan)

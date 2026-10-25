@@ -22,9 +22,12 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -77,11 +80,33 @@ public class SubscriptionService {
         Plan targetPlan = planRepository.findByNameIgnoreCase(request.targetPlanName())
                 .orElseThrow(() -> new ResourceNotFoundException("Plan not found: " + request.targetPlanName()));
 
+        Instant now = Instant.now();
+        boolean isExpired = !now.isBefore(subscription.getCurrentPeriodEnd());
+        if (isExpired) {
+            LocalDate today = now.atZone(ZoneOffset.UTC).toLocalDate();
+            LocalDate nextMonth = now.atZone(ZoneOffset.UTC).plusMonths(1).toLocalDate();
+            long totalDays = Math.max(1, ChronoUnit.DAYS.between(today, nextMonth));
+            BigDecimal newPlanPrice = targetPlan.getMonthlyPrice().setScale(2, RoundingMode.HALF_UP);
+            BigDecimal oldPlanPrice = subscription.getPlan().getMonthlyPrice().setScale(2, RoundingMode.HALF_UP);
+            return new ProrationPreviewResponse(
+                    subscription.getPlan().getName(),
+                    targetPlan.getName(),
+                    totalDays,
+                    totalDays,
+                    oldPlanPrice,
+                    BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                    newPlanPrice,
+                    newPlanPrice,
+                    newPlanPrice
+            );
+        }
+
         return prorationService.calculate(
                 subscription.getPlan(),
                 targetPlan,
                 subscription.getCurrentPeriodStart(),
-                subscription.getCurrentPeriodEnd()
+                subscription.getCurrentPeriodEnd(),
+                now
         );
     }
 
@@ -119,32 +144,61 @@ public class SubscriptionService {
             ));
         }
 
-        // 7. Calculate deterministic proration breakdown
+        // 7. Calculate deterministic proration breakdown or expired cycle renewal
         Instant now = Instant.now();
         Plan oldPlan = subscription.getPlan();
-        ProrationPreviewResponse proration = prorationService.calculate(
-                oldPlan,
-                targetPlan,
-                subscription.getCurrentPeriodStart(),
-                subscription.getCurrentPeriodEnd(),
-                now
-        );
+        boolean isExpired = !now.isBefore(subscription.getCurrentPeriodEnd());
 
-        // 8. Update Subscription and Tenant plan bindings
-        subscription.setPlan(targetPlan);
-        subscriptionRepository.save(subscription);
+        BigDecimal netDue;
+        long responseDaysRemaining;
+        LocalDate periodStart;
+        LocalDate periodEnd;
 
-        Tenant tenant = subscription.getTenant();
-        tenant.setPlan(targetPlan);
-        tenantRepository.save(tenant);
+        if (isExpired) {
+            // Expired cycle: full reset
+            Instant newPeriodStart = now;
+            Instant newPeriodEnd = now.atZone(ZoneOffset.UTC).plusMonths(1).toInstant();
+
+            subscription.setCurrentPeriodStart(newPeriodStart);
+            subscription.setCurrentPeriodEnd(newPeriodEnd);
+            subscription.setPlan(targetPlan);
+            subscriptionRepository.save(subscription);
+
+            Tenant tenant = subscription.getTenant();
+            tenant.setPlan(targetPlan);
+            tenantRepository.save(tenant);
+
+            netDue = targetPlan.getMonthlyPrice().setScale(2, RoundingMode.HALF_UP);
+            periodStart = newPeriodStart.atZone(ZoneOffset.UTC).toLocalDate();
+            periodEnd = newPeriodEnd.atZone(ZoneOffset.UTC).toLocalDate();
+            responseDaysRemaining = prorationService.calculateDaysRemaining(newPeriodEnd, now);
+        } else {
+            // Active cycle: compute standard mid-cycle proration
+            ProrationPreviewResponse proration = prorationService.calculate(
+                    oldPlan,
+                    targetPlan,
+                    subscription.getCurrentPeriodStart(),
+                    subscription.getCurrentPeriodEnd(),
+                    now
+            );
+
+            subscription.setPlan(targetPlan);
+            subscriptionRepository.save(subscription);
+
+            Tenant tenant = subscription.getTenant();
+            tenant.setPlan(targetPlan);
+            tenantRepository.save(tenant);
+
+            netDue = proration.netDue();
+            periodStart = subscription.getCurrentPeriodStart().atZone(ZoneOffset.UTC).toLocalDate();
+            periodEnd = subscription.getCurrentPeriodEnd().atZone(ZoneOffset.UTC).toLocalDate();
+            responseDaysRemaining = proration.daysRemaining();
+        }
 
         // 9. Generate immutable invoice record
-        LocalDate periodStart = subscription.getCurrentPeriodStart().atZone(ZoneOffset.UTC).toLocalDate();
-        LocalDate periodEnd = subscription.getCurrentPeriodEnd().atZone(ZoneOffset.UTC).toLocalDate();
-
         Invoice invoice = Invoice.builder()
-                .tenant(tenant)
-                .amount(proration.netDue())
+                .tenant(subscription.getTenant())
+                .amount(netDue)
                 .status(InvoiceStatus.PAID)
                 .idempotencyKey(idempotencyKey)
                 .billingPeriodStart(periodStart)
@@ -157,7 +211,7 @@ public class SubscriptionService {
         UUID actorId = resolveCurrentActorId(tenantId);
         String changesJson = String.format(
                 "{\"oldPlan\":\"%s\",\"newPlan\":\"%s\",\"netDue\":%s,\"invoiceId\":\"%s\"}",
-                oldPlan.getName(), targetPlan.getName(), proration.netDue(), savedInvoice.getId()
+                oldPlan.getName(), targetPlan.getName(), netDue, savedInvoice.getId()
         );
         auditService.log(
                 tenantId,
@@ -168,7 +222,7 @@ public class SubscriptionService {
                 changesJson
         );
 
-        return SubscriptionResponse.from(subscription, proration.daysRemaining());
+        return SubscriptionResponse.from(subscription, responseDaysRemaining);
     }
 
     private UUID getRequiredTenantId() {
